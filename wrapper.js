@@ -1,8 +1,9 @@
 var assert = require('assert');
-var translate = require('./translate.js');
-var requireFromString = require('require-from-string');
 var https = require('https');
 var MemoryStream = require('memorystream');
+var requireFromString = require('require-from-string');
+
+var translate = require('./translate.js');
 
 function setupMethods (soljson) {
   var copyString = function (str, ptr) {
@@ -26,7 +27,17 @@ function setupMethods (soljson) {
   };
 
   // This calls compile() with args || cb
-  var runWithReadCallback = function (readCallback, compile, args) {
+  var runWithReadCallback = function (callbacks, compile, args) {
+    var readCallback;
+    var smtCallback;
+    if (callbacks !== undefined) {
+      if (typeof callbacks === 'function') {
+        readCallback = callbacks;
+      } else {
+        readCallback = callbacks.readCallback;
+        smtCallback = callbacks.smtCallback;
+      }
+    }
     if (readCallback === undefined) {
       readCallback = function (path) {
         return {
@@ -40,15 +51,26 @@ function setupMethods (soljson) {
     var removeFunction = soljson.removeFunction || soljson.Runtime.removeFunction;
 
     var cb = addFunction(wrapCallback(readCallback));
+    args.push(cb);
+    var cbSmt;
+    if (smtCallback !== undefined) {
+      cbSmt = addFunction(wrapCallback(smtCallback));
+      args.push(cbSmt);
+    }
     var output;
     try {
-      args.push(cb);
       output = compile.apply(undefined, args);
     } catch (e) {
       removeFunction(cb);
+      if (cbSmt !== undefined) {
+        removeFunction(cbSmt);
+      }
       throw e;
     }
     removeFunction(cb);
+    if (cbSmt !== undefined) {
+      removeFunction(cbSmt);
+    }
     return output;
   };
 
@@ -85,9 +107,9 @@ function setupMethods (soljson) {
   }
 
   // Expects a Standard JSON I/O but supports old compilers
-  var compileStandardWrapper = function (input, readCallback) {
+  var compileStandardWrapper = function (input, callbacks) {
     if (compileStandard !== null) {
-      return compileStandard(input, readCallback);
+      return compileStandard(input, callbacks);
     }
 
     function formatFatalError (message) {
@@ -104,8 +126,21 @@ function setupMethods (soljson) {
       });
     }
 
+    var readCallback;
+    var smtCallback;
+    if (callbacks !== undefined) {
+      if (typeof callbacks === 'function') {
+        readCallback = callbacks;
+      } else {
+        readCallback = callbacks.readCallback;
+        smtCallback = callbacks.smtCallback;
+      }
+    }
     if (readCallback !== undefined && typeof readCallback !== 'function') {
       return formatFatalError('Invalid import callback supplied');
+    }
+    if (smtCallback !== undefined && typeof smtCallback !== 'function') {
+      return formatFatalError('Invalid SMT solver callback supplied');
     }
 
     try {
